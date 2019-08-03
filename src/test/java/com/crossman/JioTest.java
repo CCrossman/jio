@@ -272,4 +272,85 @@ public class JioTest {
 			assertEquals(Integer.valueOf(4), a);
 		});
 	}
+
+	@Test
+	public void testJioFlatMapFromSuccess() {
+		Jio<Void,String,String> jio1 = Jio.success("Hello World");
+		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("HELLO WORLD", a);
+		});
+
+		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
+		jio3.unsafeRun(null, (ex,a) -> {
+			assertEquals("hello world", ex);
+			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioFlatMapFromFailure() {
+		Jio<Void,String,String> jio1 = Jio.fail("Bad Request");
+		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertEquals("Bad Request", ex);
+			assertNull(a);
+		});
+
+		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
+		jio3.unsafeRun(null, (ex,a) -> {
+			assertEquals("Bad Request", ex);
+			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioFlatMapFromPromise() {
+		Jio.Promise<Void,String,String> jio1 = Jio.promise();
+		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("FOOBAR", a);
+		});
+
+		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.success(s.toLowerCase()));
+		jio3.unsafeRun(null, (ex,a) -> {
+			assertEquals("foobar", ex);
+			assertNull(a);
+		});
+		jio1.setDelegate(Jio.success("FooBar"));
+	}
+
+	@Test
+	public void testJioFlatMapFromEvalAlways() {
+		Jio<Void,String,String> jio1 = Jio.effect(() -> "Foo");
+		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("FOO", a);
+		});
+
+		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
+		jio3.unsafeRun(null, (ex,a) -> {
+			assertEquals("foo", ex);
+			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioFlatMapFromSinkAndSource() {
+		Jio<Integer, String, String> jio1 = Jio.<Integer,Throwable,String>fromFunction(i -> "Xx" + i).mapError(t -> t.toString());
+		Jio<Integer, String, String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
+		jio2.unsafeRun(5, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("XX5", a);
+		});
+
+		Jio<Integer, String, String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
+		jio3.unsafeRun(4, (ex,a) -> {
+			assertEquals("xx4", ex);
+			assertNull(a);
+		});
+	}
 }
