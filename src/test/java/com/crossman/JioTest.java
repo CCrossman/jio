@@ -170,4 +170,55 @@ public class JioTest {
 			assertNull(a);
 		});
 	}
+
+	@Test
+	public void testJioMappableFromSuccess() {
+		Jio<Void,String,Integer> jio1 = Jio.success(10);
+		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("X10", a);
+		});
+	}
+
+	@Test
+	public void testJioMappableFromFailure() {
+		Jio<Void,String,Integer> jio1 = Jio.fail("Bad request");
+		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertEquals("Bad request", ex);
+			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioMappableFromEvalAlways() {
+		Jio<Void,String,Integer> jio1 = Jio.effect(() -> 5);
+		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("X5", a);
+		});
+	}
+
+	@Test
+	public void testJioMappableFromPromise() {
+		Jio.Promise<Void,String,Integer> jio1 = Jio.promise();
+		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("X4", a);
+		});
+		jio1.setDelegate(Jio.success(4));
+	}
+
+	@Test
+	public void testJioMappableFromSinkAndSource() {
+		Jio<Integer,Throwable,Integer> jio1 = Jio.fromFunction(i -> i + 1);
+		Jio<Integer,Throwable,String> jio2 = jio1.map(i -> "X" + i);
+		jio2.unsafeRun(3, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("X4", a);
+		});
+	}
 }

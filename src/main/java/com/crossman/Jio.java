@@ -19,7 +19,8 @@ public abstract class Jio<R,E,A> {
 	// sealed type
 	private Jio() {}
 
-	protected abstract void unsafeRun(R r, BiConsumer<E,A> blk);
+	public abstract <B> Jio<R,E,B> map(Function<A,B> fn);
+	public abstract void unsafeRun(R r, BiConsumer<E,A> blk);
 
 	/**
 	 * constructs a Jio instance that runs its effect(s) every
@@ -155,6 +156,18 @@ public abstract class Jio<R,E,A> {
 	}
 
 	/**
+	 * constructs an incomplete Jio instance
+	 *
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Promise<R,E,A> promise() {
+		return new Promise<>();
+	}
+
+	/**
 	 * constructs a successful Jio instance
 	 *
 	 * @param value the value
@@ -220,7 +233,12 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		protected void unsafeRun(R r, BiConsumer<E, A> blk) {
+		public <B> Jio<R, E, B> map(Function<A, B> fn) {
+			return jioSupplier.get().map(fn);
+		}
+
+		@Override
+		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			jioSupplier.get().unsafeRun(r,blk);
 		}
 	}
@@ -241,7 +259,13 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		protected void unsafeRun(R r, BiConsumer<E, A> blk) {
+		@SuppressWarnings("unchecked")
+		public <B> Jio<R, E, B> map(Function<A, B> fn) {
+			return (Jio<R,E,B>)this;
+		}
+
+		@Override
+		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			blk.accept(error,null);
 		}
 	}
@@ -267,7 +291,25 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		protected void unsafeRun(R r, BiConsumer<E, A> blk) {
+		public <B> Jio<R, E, B> map(Function<A, B> fn) {
+			final Promise<R,E,B> p = new Promise<>();
+
+			if (delegate == null) {
+				onCompleteListeners.add(new Listener<R, E, A>() {
+					@Override
+					public void onComplete(Jio<R, E, A> jio) {
+						p.setDelegate(jio.map(fn));
+					}
+				});
+			} else {
+				p.setDelegate(delegate.map(fn));
+			}
+
+			return p;
+		}
+
+		@Override
+		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			if (delegate == null) {
 				onCompleteListeners.add(new Listener<R, E, A>() {
 					@Override
@@ -281,6 +323,14 @@ public abstract class Jio<R,E,A> {
 		}
 	}
 
+	/**
+	 * Represents a Jio instance that accepts an environment value,
+	 * transforms it, and emits the result using another consumer.
+	 *
+	 * @param <R> the Environment type
+	 * @param <E> the Failure type
+	 * @param <A> the Value type
+	 */
 	public static final class SinkAndSource<R,E,A> extends Jio<R,E,A> {
 		private final BiConsumer<R,BiConsumer<E,A>> bic;
 
@@ -289,7 +339,23 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		protected void unsafeRun(R r, BiConsumer<E, A> blk) {
+		public <B> Jio<R, E, B> map(Function<A, B> fn) {
+			return new SinkAndSource<R,E,B>(new BiConsumer<R, BiConsumer<E, B>>() {
+				@Override
+				public void accept(R r, BiConsumer<E, B> ebBiConsumer) {
+					bic.accept(r, (e,a) -> {
+						if (e != null) {
+							ebBiConsumer.accept(e, null);
+						} else {
+							ebBiConsumer.accept(null, fn.apply(a));
+						}
+					});
+				}
+			});
+		}
+
+		@Override
+		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			bic.accept(r,blk);
 		}
 	}
@@ -310,7 +376,12 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		protected void unsafeRun(R r, BiConsumer<E, A> blk) {
+		public <B> Jio<R, E, B> map(Function<A, B> fn) {
+			return new Success<>(fn.apply(value));
+		}
+
+		@Override
+		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			blk.accept(null,value);
 		}
 	}
