@@ -221,4 +221,55 @@ public class JioTest {
 			assertEquals("X4", a);
 		});
 	}
+
+	@Test
+	public void testJioMapErrorFromSuccess() {
+		Jio<Void,String,Integer> jio1 = Jio.success(10);
+		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(10),a);
+		});
+	}
+
+	@Test
+	public void testJioMapErrorFromFailure() {
+		Jio<Void,String,Integer> jio1 = Jio.fail("Bad request");
+		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertEquals(Integer.valueOf(11), ex);
+			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioMapErrorFromEvalAlways() {
+		Jio<Void,String,Integer> jio1 = Jio.effect(() -> 5);
+		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(5), a);
+		});
+	}
+
+	@Test
+	public void testJioMapErrorFromPromise() {
+		Jio.Promise<Void,String,Integer> jio1 = Jio.promise();
+		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertEquals(Integer.valueOf(4),ex);
+			assertNull(a);
+		});
+		jio1.setDelegate(Jio.fail("hiya"));
+	}
+
+	@Test
+	public void testJioMapErrorFromSinkAndSource() {
+		Jio<Integer,Throwable,Integer> jio1 = Jio.fromFunction(i -> i + 1);
+		Jio<Integer,IllegalArgumentException,Integer> jio2 = jio1.mapError(IllegalArgumentException::new);
+		jio2.unsafeRun(3, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(4), a);
+		});
+	}
 }

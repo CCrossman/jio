@@ -20,6 +20,7 @@ public abstract class Jio<R,E,A> {
 	private Jio() {}
 
 	public abstract <B> Jio<R,E,B> map(Function<A,B> fn);
+	public abstract <F> Jio<R,F,A> mapError(Function<E,F> fn);
 	public abstract void unsafeRun(R r, BiConsumer<E,A> blk);
 
 	/**
@@ -238,6 +239,11 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public <F> Jio<R, F, A> mapError(Function<E, F> fn) {
+			return jioSupplier.get().mapError(fn);
+		}
+
+		@Override
 		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			jioSupplier.get().unsafeRun(r,blk);
 		}
@@ -262,6 +268,11 @@ public abstract class Jio<R,E,A> {
 		@SuppressWarnings("unchecked")
 		public <B> Jio<R, E, B> map(Function<A, B> fn) {
 			return (Jio<R,E,B>)this;
+		}
+
+		@Override
+		public <F> Jio<R, F, A> mapError(Function<E, F> fn) {
+			return new Failure<>(fn.apply(error));
 		}
 
 		@Override
@@ -303,6 +314,24 @@ public abstract class Jio<R,E,A> {
 				});
 			} else {
 				p.setDelegate(delegate.map(fn));
+			}
+
+			return p;
+		}
+
+		@Override
+		public <F> Jio<R, F, A> mapError(Function<E, F> fn) {
+			final Promise<R,F,A> p = new Promise<>();
+
+			if (delegate == null) {
+				onCompleteListeners.add(new Listener<R, E, A>() {
+					@Override
+					public void onComplete(Jio<R, E, A> jio) {
+						p.setDelegate(jio.mapError(fn));
+					}
+				});
+			} else {
+				p.setDelegate(delegate.mapError(fn));
 			}
 
 			return p;
@@ -355,6 +384,22 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public <F> Jio<R, F, A> mapError(Function<E, F> fn) {
+			return new SinkAndSource<R,F,A>(new BiConsumer<R, BiConsumer<F, A>>() {
+				@Override
+				public void accept(R r, BiConsumer<F, A> faBiConsumer) {
+					bic.accept(r, (e,a) -> {
+						if (e != null) {
+							faBiConsumer.accept(fn.apply(e), null);
+						} else {
+							faBiConsumer.accept(null, a);
+						}
+					});
+				}
+			});
+		}
+
+		@Override
 		public void unsafeRun(R r, BiConsumer<E, A> blk) {
 			bic.accept(r,blk);
 		}
@@ -378,6 +423,12 @@ public abstract class Jio<R,E,A> {
 		@Override
 		public <B> Jio<R, E, B> map(Function<A, B> fn) {
 			return new Success<>(fn.apply(value));
+		}
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public <F> Jio<R, F, A> mapError(Function<E, F> fn) {
+			return (Jio<R,F,A>)this;
 		}
 
 		@Override
