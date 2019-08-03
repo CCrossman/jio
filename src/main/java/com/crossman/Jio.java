@@ -9,10 +9,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.*;
 
 public abstract class Jio<R,E,A> {
 
@@ -23,6 +20,18 @@ public abstract class Jio<R,E,A> {
 	public abstract <B> Jio<R,E,B> map(Function<A,B> fn);
 	public abstract <F> Jio<R,F,A> mapError(Function<E,F> fn);
 	public abstract void unsafeRun(R r, BiConsumer<E,A> blk);
+
+	public <EE extends E, B, Z> Jio<R,E,Z> zip(Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {
+		return flatMap(a -> that.map(b -> fn.apply(a,b)));
+	}
+
+	public <EE extends E, B> Jio<R,E,A> zipLeft(Jio<R,EE,B> that) {
+		return zip(that, (a,b) -> a);
+	}
+
+	public <EE extends E, B> Jio<R,E,B> zipRight(Jio<R,EE,B> that) {
+		return zip(that, (a,b) -> b);
+	}
 
 	/**
 	 * constructs a Jio instance that runs its effect(s) every
