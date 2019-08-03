@@ -16,21 +16,36 @@ public abstract class Jio<R,E,A> {
 	// sealed type
 	private Jio() {}
 
-	public abstract <B extends A> Jio<R,Void,A> catchAll(Function<E, Jio<R,Void,B>> fn);
-	public abstract <EE extends E, B> Jio<R,E,B> flatMap(Function<A, Jio<R,EE,B>> fn);
-	public abstract <B> Jio<R,E,B> map(Function<A,B> fn);
+	public final <B extends A> Jio<R,Void,A> catchAll(Function<E, Jio<R,Void,B>> fn) {
+		return this.foldM(e -> fn.apply(e).map(b -> (A)b).mapError($ -> (E)null), a -> Jio.success(a)).mapError(e -> (Void)null);
+	}
+
+	public final <EE extends E, B> Jio<R,E,B> flatMap(Function<A, Jio<R,EE,B>> fn) {
+		return this.foldM(e -> Jio.fail(e), a -> fn.apply(a));
+	}
+
+	public final <Z> Jio<R,E,Z> fold(Function<E,Z> onFail, Function<A,Z> onPass) {
+		return foldM(e -> Jio.success(onFail.apply(e)), a -> Jio.success(onPass.apply(a)));
+	}
+
+	public abstract <E1 extends E, E2 extends E, Z> Jio<R,E,Z> foldM(Function<E, Jio<R,E1,Z>> onFail, Function<A, Jio<R,E2,Z>> onPass);
+
+	public final <B> Jio<R,E,B> map(Function<A,B> fn) {
+		return flatMap(a -> Jio.success(fn.apply(a)));
+	}
+
 	public abstract <F> Jio<R,F,A> mapError(Function<E,F> fn);
 	public abstract void unsafeRun(R r, BiConsumer<E,A> blk);
 
-	public <EE extends E, B, Z> Jio<R,E,Z> zip(Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {
+	public final <EE extends E, B, Z> Jio<R,E,Z> zip(Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {
 		return flatMap(a -> that.map(b -> fn.apply(a,b)));
 	}
 
-	public <EE extends E, B> Jio<R,E,A> zipLeft(Jio<R,EE,B> that) {
+	public final <EE extends E, B> Jio<R,E,A> zipLeft(Jio<R,EE,B> that) {
 		return zip(that, (a,b) -> a);
 	}
 
-	public <EE extends E, B> Jio<R,E,B> zipRight(Jio<R,EE,B> that) {
+	public final <EE extends E, B> Jio<R,E,B> zipRight(Jio<R,EE,B> that) {
 		return zip(that, (a,b) -> b);
 	}
 
@@ -245,18 +260,8 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
-			return jioSupplier.get().catchAll(fn);
-		}
-
-		@Override
-		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
-			return jioSupplier.get().flatMap(fn);
-		}
-
-		@Override
-		public <B> Jio<R, E, B> map(Function<A, B> fn) {
-			return jioSupplier.get().map(fn);
+		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
+			return jioSupplier.get().foldM(onFail,onPass);
 		}
 
 		@Override
@@ -286,20 +291,8 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
-			return fn.apply(error).map(b -> (A)b);
-		}
-
-		@Override
-		@SuppressWarnings("unchecked")
-		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
-			return (Jio<R,E,B>)this;
-		}
-
-		@Override
-		@SuppressWarnings("unchecked")
-		public <B> Jio<R, E, B> map(Function<A, B> fn) {
-			return (Jio<R,E,B>)this;
+		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
+			return onFail.apply(error).mapError(e1 -> (E)e1);
 		}
 
 		@Override
@@ -334,54 +327,18 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
-			final Promise<R,Void,A> p = new Promise<>();
+		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
+			final Promise<R,E,Z> p = new Promise<>();
 
 			if (delegate == null) {
 				onCompleteListeners.add(new Listener<R, E, A>() {
 					@Override
 					public void onComplete(Jio<R, E, A> jio) {
-						p.setDelegate(jio.catchAll(fn));
+						p.setDelegate(jio.foldM(onFail,onPass));
 					}
 				});
 			} else {
-				p.setDelegate(delegate.catchAll(fn));
-			}
-
-			return p;
-		}
-
-		@Override
-		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
-			final Promise<R,E,B> p = new Promise<>();
-
-			if (delegate == null) {
-				onCompleteListeners.add(new Listener<R, E, A>() {
-					@Override
-					public void onComplete(Jio<R, E, A> jio) {
-						p.setDelegate(jio.flatMap(fn));
-					}
-				});
-			} else {
-				p.setDelegate(delegate.flatMap(fn));
-			}
-
-			return p;
-		}
-
-		@Override
-		public <B> Jio<R, E, B> map(Function<A, B> fn) {
-			final Promise<R,E,B> p = new Promise<>();
-
-			if (delegate == null) {
-				onCompleteListeners.add(new Listener<R, E, A>() {
-					@Override
-					public void onComplete(Jio<R, E, A> jio) {
-						p.setDelegate(jio.map(fn));
-					}
-				});
-			} else {
-				p.setDelegate(delegate.map(fn));
+				p.setDelegate(delegate.foldM(onFail,onPass));
 			}
 
 			return p;
@@ -436,53 +393,15 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
-			return new SinkAndSource<R,Void,A>(new BiConsumer<R, BiConsumer<Void, A>>() {
+		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
+			return new SinkAndSource<R,E,Z>(new BiConsumer<R, BiConsumer<E, Z>>() {
 				@Override
-				public void accept(R r, BiConsumer<Void, A> voidABiConsumer) {
+				public void accept(R r, BiConsumer<E, Z> ezBiConsumer) {
 					bic.accept(r, (e,a) -> {
 						if (e != null) {
-							fn.apply(e).unsafeRun(r, voidABiConsumer::accept);
+							onFail.apply(e).unsafeRun(r, ezBiConsumer::accept);
 						} else {
-							voidABiConsumer.accept(null, a);
-						}
-					});
-				}
-			});
-		}
-
-		@Override
-		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
-			return new SinkAndSource<R,E,B>(new BiConsumer<R, BiConsumer<E, B>>() {
-				@Override
-				public void accept(R r, BiConsumer<E, B> ebBiConsumer) {
-					bic.accept(r, (e,a) -> {
-						if (e != null) {
-							ebBiConsumer.accept(e,null);
-						} else {
-							fn.apply(a).unsafeRun(r, (ee,b) -> {
-								if (ee != null) {
-									ebBiConsumer.accept(ee, null);
-								} else {
-									ebBiConsumer.accept(null, b);
-								}
-							});
-						}
-					});
-				}
-			});
-		}
-
-		@Override
-		public <B> Jio<R, E, B> map(Function<A, B> fn) {
-			return new SinkAndSource<R,E,B>(new BiConsumer<R, BiConsumer<E, B>>() {
-				@Override
-				public void accept(R r, BiConsumer<E, B> ebBiConsumer) {
-					bic.accept(r, (e,a) -> {
-						if (e != null) {
-							ebBiConsumer.accept(e, null);
-						} else {
-							ebBiConsumer.accept(null, fn.apply(a));
+							onPass.apply(a).unsafeRun(r, ezBiConsumer::accept);
 						}
 					});
 				}
@@ -527,19 +446,8 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		@SuppressWarnings("unchecked")
-		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
-			return (Jio<R,Void,A>)this;
-		}
-
-		@Override
-		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
-			return fn.apply(value).mapError(ee -> (E)ee);
-		}
-
-		@Override
-		public <B> Jio<R, E, B> map(Function<A, B> fn) {
-			return new Success<>(fn.apply(value));
+		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
+			return onPass.apply(value).mapError(e2 -> (E)e2);
 		}
 
 		@Override
