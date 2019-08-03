@@ -16,6 +16,7 @@ public abstract class Jio<R,E,A> {
 	// sealed type
 	private Jio() {}
 
+	public abstract <B extends A> Jio<R,Void,A> catchAll(Function<E, Jio<R,Void,B>> fn);
 	public abstract <EE extends E, B> Jio<R,E,B> flatMap(Function<A, Jio<R,EE,B>> fn);
 	public abstract <B> Jio<R,E,B> map(Function<A,B> fn);
 	public abstract <F> Jio<R,F,A> mapError(Function<E,F> fn);
@@ -244,6 +245,11 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
+			return jioSupplier.get().catchAll(fn);
+		}
+
+		@Override
 		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
 			return jioSupplier.get().flatMap(fn);
 		}
@@ -277,6 +283,11 @@ public abstract class Jio<R,E,A> {
 
 		private Failure(E error) {
 			this.error = error;
+		}
+
+		@Override
+		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
+			return fn.apply(error).map(b -> (A)b);
 		}
 
 		@Override
@@ -320,6 +331,24 @@ public abstract class Jio<R,E,A> {
 
 		public void setDelegate(Jio<R, E, A> delegate) {
 			this.delegate = delegate;
+		}
+
+		@Override
+		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
+			final Promise<R,Void,A> p = new Promise<>();
+
+			if (delegate == null) {
+				onCompleteListeners.add(new Listener<R, E, A>() {
+					@Override
+					public void onComplete(Jio<R, E, A> jio) {
+						p.setDelegate(jio.catchAll(fn));
+					}
+				});
+			} else {
+				p.setDelegate(delegate.catchAll(fn));
+			}
+
+			return p;
 		}
 
 		@Override
@@ -407,6 +436,22 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
+			return new SinkAndSource<R,Void,A>(new BiConsumer<R, BiConsumer<Void, A>>() {
+				@Override
+				public void accept(R r, BiConsumer<Void, A> voidABiConsumer) {
+					bic.accept(r, (e,a) -> {
+						if (e != null) {
+							fn.apply(e).unsafeRun(r, voidABiConsumer::accept);
+						} else {
+							voidABiConsumer.accept(null, a);
+						}
+					});
+				}
+			});
+		}
+
+		@Override
 		public <EE extends E, B> Jio<R, E, B> flatMap(Function<A, Jio<R, EE, B>> fn) {
 			return new SinkAndSource<R,E,B>(new BiConsumer<R, BiConsumer<E, B>>() {
 				@Override
@@ -479,6 +524,12 @@ public abstract class Jio<R,E,A> {
 
 		private Success(A value) {
 			this.value = value;
+		}
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public <B extends A> Jio<R, Void, A> catchAll(Function<E, Jio<R, Void, B>> fn) {
+			return (Jio<R,Void,A>)this;
 		}
 
 		@Override

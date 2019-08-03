@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -351,6 +352,67 @@ public class JioTest {
 		jio3.unsafeRun(4, (ex,a) -> {
 			assertEquals("xx4", ex);
 			assertNull(a);
+		});
+	}
+
+	@Test
+	public void testJioCatchAllFromSuccess() {
+		Jio<Void, String, Integer> jio1 = Jio.success(5);
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(5), a);
+		});
+	}
+
+	@Test
+	public void testJioCatchAllFromFailure() {
+		Jio<Void, String, Integer> jio1 = Jio.fail("Bad Request");
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(11), a);
+		});
+	}
+
+	@Test
+	public void testJioCatchAllFromPromise() {
+		Jio.Promise<Void, String, Integer> jio1 = Jio.promise();
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(5), a);
+		});
+		jio1.setDelegate(Jio.fail("Hello"));
+	}
+
+	@Test
+	public void testJioCatchAllFromEvalAlways() {
+		AtomicInteger ai = new AtomicInteger(0);
+		Jio<Void, String, Integer> jio1 = Jio.effect(ai::incrementAndGet);
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Integer.valueOf(1), a);
+		});
+	}
+
+	@Test
+	public void testJioCatchAllFromSinkAndSource() {
+		Jio<String, Throwable, Integer> jio1 = Jio.fromFunction(s -> {
+			if (s.isEmpty()) {
+				throw new UnsupportedOperationException();
+			}
+			return s.length();
+		});
+		Jio<String, Void, Integer> jio2 = jio1.catchAll(t -> Jio.success(-1));
+		jio2.unsafeRun("", ($,i) -> {
+			assertNull($);
+			assertEquals(Integer.valueOf(-1),i);
+		});
+		jio2.unsafeRun("Foobar", ($,i) -> {
+			assertNull($);
+			assertEquals(Integer.valueOf(6), i);
 		});
 	}
 }
