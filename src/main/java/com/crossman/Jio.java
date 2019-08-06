@@ -16,9 +16,15 @@ public abstract class Jio<R,E,A> {
 	// sealed type
 	private Jio() {}
 
+	public final <EE extends E,B> Jio<R,E,B> bracket(Function<A,Jio<R,Void,Void>> onRelease, Function<A,Jio<R,EE,B>> onUse) {
+		return this.flatMap(a -> onUse.apply(a).ensuring(onRelease.apply(a)));
+	}
+
 	public final <B extends A> Jio<R,Void,A> catchAll(Function<E, Jio<R,Void,B>> fn) {
 		return this.foldM(e -> fn.apply(e).map(b -> (A)b).mapError($ -> (E)null), a -> Jio.success(a)).mapError(e -> (Void)null);
 	}
+
+	public abstract Jio<R,E,A> ensuring(Jio<R,Void,Void> finalizer);
 
 	public final <EE extends E, B> Jio<R,E,B> flatMap(Function<A, Jio<R,EE,B>> fn) {
 		return this.foldM(e -> Jio.fail(e), a -> fn.apply(a));
@@ -260,6 +266,11 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+			return jioSupplier.get().ensuring(finalizer);
+		}
+
+		@Override
 		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
 			return jioSupplier.get().foldM(onFail,onPass);
 		}
@@ -288,6 +299,18 @@ public abstract class Jio<R,E,A> {
 
 		private Failure(E error) {
 			this.error = error;
+		}
+
+		@Override
+		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+			return new SinkAndSource<>(new BiConsumer<R, BiConsumer<E, A>>() {
+				@Override
+				public void accept(R r, BiConsumer<E, A> eaBiConsumer) {
+					finalizer.unsafeRun(r, ($1,$2) -> {
+						eaBiConsumer.accept(error,null);
+					});
+				}
+			});
 		}
 
 		@Override
@@ -324,6 +347,24 @@ public abstract class Jio<R,E,A> {
 
 		public void setDelegate(Jio<R, E, A> delegate) {
 			this.delegate = delegate;
+		}
+
+		@Override
+		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+			final Promise<R,E,A> p = new Promise<>();
+
+			if (delegate == null) {
+				onCompleteListeners.add(new Listener<R, E, A>() {
+					@Override
+					public void onComplete(Jio<R, E, A> jio) {
+						p.setDelegate(jio.ensuring(finalizer));
+					}
+				});
+			} else {
+				p.setDelegate(delegate.ensuring(finalizer));
+			}
+
+			return p;
 		}
 
 		@Override
@@ -393,6 +434,18 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+			return new SinkAndSource<>(new BiConsumer<R, BiConsumer<E, A>>() {
+				@Override
+				public void accept(R r, BiConsumer<E, A> eaBiConsumer) {
+					finalizer.unsafeRun(r, ($1,$2) -> {
+						bic.accept(r, eaBiConsumer);
+					});
+				}
+			});
+		}
+
+		@Override
 		public <E1 extends E, E2 extends E, Z> Jio<R, E, Z> foldM(Function<E, Jio<R, E1, Z>> onFail, Function<A, Jio<R, E2, Z>> onPass) {
 			return new SinkAndSource<R,E,Z>(new BiConsumer<R, BiConsumer<E, Z>>() {
 				@Override
@@ -443,6 +496,18 @@ public abstract class Jio<R,E,A> {
 
 		private Success(A value) {
 			this.value = value;
+		}
+
+		@Override
+		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+			return new SinkAndSource<>(new BiConsumer<R, BiConsumer<E, A>>() {
+				@Override
+				public void accept(R r, BiConsumer<E, A> eaBiConsumer) {
+					finalizer.unsafeRun(r, ($1,$2) -> {
+						eaBiConsumer.accept(null,value);
+					});
+				}
+			});
 		}
 
 		@Override

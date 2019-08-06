@@ -1,14 +1,18 @@
 package com.crossman;
 
+import com.crossman.util.CheckedFunction;
 import com.crossman.util.CheckedSupplier;
 import org.junit.Test;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static junit.framework.TestCase.*;
@@ -413,6 +417,71 @@ public class JioTest {
 		jio2.unsafeRun("Foobar", ($,i) -> {
 			assertNull($);
 			assertEquals(Integer.valueOf(6), i);
+		});
+	}
+
+	@Test
+	public void testEnsuringOverEffect() {
+		final List<String> out = new ArrayList<>();
+		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.effect(() -> {
+			out.add("Finalized!");
+			return null;
+		}));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertEquals(1, out.size());
+			assertNull(a);
+			assertEquals("Failed!", ex);
+		});
+	}
+
+//	@Test
+//	public void testEnsuringOverSinkAndSource() {
+//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fromTotalFunction($ -> null));
+//		jio2.unsafeRun(null, (ex,a) -> {
+//			assertNull(a);
+//			assertEquals("Failed!", ex);
+//		});
+//	}
+
+	@Test
+	public void testEnsuringOverPromise() {
+		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.promise());
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(a);
+			assertEquals("Failed!", ex);
+		});
+	}
+
+//	@Test
+//	public void testEnsuringOverSuccess() {
+//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.success(null));
+//		jio2.unsafeRun(null, (ex,a) -> {
+//			assertNull(a);
+//			assertEquals("Failed!", ex);
+//		});
+//	}
+
+//	@Test
+//	public void testEnsuringOverFailure() {
+//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fail(null));
+//		jio2.unsafeRun(null, (ex,a) -> {
+//			assertNull(a);
+//			assertEquals("Failed!", ex);
+//		});
+//	}
+
+	@Test
+	public void testBracket() {
+		Jio<String, FileNotFoundException, File> jio1 = Jio.fromFunction(File::new);
+		Jio<String, FileNotFoundException, Long> jio2 = jio1.bracket(f -> Jio.effect(() -> null), f -> Jio.effect(() -> f.length()));
+		jio2.unsafeRun("/not/a/file", (ex,a) -> {
+			assertNull(ex);
+			assertEquals(Long.valueOf(0), a);
 		});
 	}
 }
