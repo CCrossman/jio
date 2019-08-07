@@ -1,18 +1,18 @@
 package com.crossman;
 
-import com.crossman.util.CheckedFunction;
 import com.crossman.util.CheckedSupplier;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static junit.framework.TestCase.*;
@@ -83,7 +83,7 @@ public class JioTest {
 	@Test
 	public void testJioEffectRunsEveryTime() throws InterruptedException {
 		final List<String> out = new ArrayList<>();
-		Jio<Void,Void,String> jio = Jio.effect(new Supplier<String>() {
+		Jio<Void,Void,String> jio = Jio.effectTotal(new Supplier<String>() {
 			@Override
 			public String get() {
 				out.add("Hello");
@@ -198,7 +198,7 @@ public class JioTest {
 
 	@Test
 	public void testJioMappableFromEvalAlways() {
-		Jio<Void,String,Integer> jio1 = Jio.effect(() -> 5);
+		Jio<Void,String,Integer> jio1 = Jio.effectTotal(() -> 5);
 		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
@@ -249,7 +249,7 @@ public class JioTest {
 
 	@Test
 	public void testJioMapErrorFromEvalAlways() {
-		Jio<Void,String,Integer> jio1 = Jio.effect(() -> 5);
+		Jio<Void,String,Integer> jio1 = Jio.effectTotal(() -> 5);
 		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
@@ -329,7 +329,7 @@ public class JioTest {
 
 	@Test
 	public void testJioFlatMapFromEvalAlways() {
-		Jio<Void,String,String> jio1 = Jio.effect(() -> "Foo");
+		Jio<Void,String,String> jio1 = Jio.effectTotal(() -> "Foo");
 		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
@@ -393,7 +393,7 @@ public class JioTest {
 	@Test
 	public void testJioCatchAllFromEvalAlways() {
 		AtomicInteger ai = new AtomicInteger(0);
-		Jio<Void, String, Integer> jio1 = Jio.effect(ai::incrementAndGet);
+		Jio<Void, String, Integer> jio1 = Jio.effectTotal(ai::incrementAndGet);
 		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
@@ -424,7 +424,7 @@ public class JioTest {
 	public void testEnsuringOverEffect() {
 		final List<String> out = new ArrayList<>();
 		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
-		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.effect(() -> {
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.effectTotal(() -> {
 			out.add("Finalized!");
 			return null;
 		}));
@@ -478,10 +478,63 @@ public class JioTest {
 	@Test
 	public void testBracket() {
 		Jio<String, FileNotFoundException, File> jio1 = Jio.fromFunction(File::new);
-		Jio<String, FileNotFoundException, Long> jio2 = jio1.bracket(f -> Jio.effect(() -> null), f -> Jio.effect(() -> f.length()));
+		Jio<String, FileNotFoundException, Long> jio2 = jio1.bracket(f -> Jio.effectTotal(() -> null), f -> Jio.effectTotal(() -> f.length()));
 		jio2.unsafeRun("/not/a/file", (ex,a) -> {
 			assertNull(ex);
 			assertEquals(Long.valueOf(0), a);
 		});
+	}
+
+	@Test
+	public void testZipPar() throws InterruptedException {
+		long start = System.currentTimeMillis();
+		Jio<Void, InterruptedException, String> jio1 = Jio.effect(() -> {
+			Thread.sleep(500L);
+			return "Hello";
+		});
+		Jio<Void, InterruptedException, String> jio2 = Jio.effect(() -> {
+			Thread.sleep(600L);
+			return "World";
+		});
+
+		final AtomicBoolean called = new AtomicBoolean(false);
+		jio1.zipPar(jio2, (a,b) -> a + " " + b).unsafeRun(null, (ie,s) -> {
+			assertNull(ie);
+			assertEquals("Hello World", s);
+			long duration = System.currentTimeMillis() - start;
+			assertTrue(duration < 700);
+			called.set(true);
+		});
+
+		Thread.sleep(800);
+		assertTrue(called.get());
+	}
+
+	@Test
+	public void testCollectPar() throws InterruptedException {
+		long start = System.currentTimeMillis();
+		Jio<Void, InterruptedException, String> jio1 = Jio.effect(() -> {
+			Thread.sleep(500L);
+			return "Hel";
+		});
+		Jio<Void, InterruptedException, String> jio2 = Jio.effect(() -> {
+			Thread.sleep(500L);
+			return "lo W";
+		});
+		Jio<Void, InterruptedException, String> jio3 = Jio.effect(() -> {
+			Thread.sleep(600L);
+			return "orld";
+		});
+		final AtomicBoolean called = new AtomicBoolean(false);
+		Jio.collectPar(Arrays.asList(jio1,jio2,jio3)).unsafeRun(null, (ex, lst) -> {
+			assertNull(ex);
+			assertEquals(lst, Arrays.asList("Hel", "lo W", "orld"));
+			long duration = System.currentTimeMillis() - start;
+			assertTrue(duration < 700);
+			called.set(true);
+		});
+
+		Thread.sleep(800);
+		assertTrue(called.get());
 	}
 }

@@ -3,12 +3,13 @@ package com.crossman;
 import com.crossman.util.CheckedFunction;
 import com.crossman.util.CheckedSupplier;
 
-import java.util.ArrayDeque;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 
 public abstract class Jio<R,E,A> {
@@ -55,8 +56,94 @@ public abstract class Jio<R,E,A> {
 		return zip(that, (a,b) -> b);
 	}
 
+	public final <EE extends E, B, Z> Jio<R,E,Z> zipPar(Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {
+		return zipPar(that, Executors.newCachedThreadPool(), fn);
+	}
+
+	public final <EE extends E, B, Z> Jio<R,E,Z> zipPar(Jio<R,EE,B> that, Executor executor, BiFunction<A,B,Z> fn) {
+		final AtomicReference<Optional<A>> aValue = new AtomicReference<>(Optional.empty());
+		final AtomicReference<Optional<B>> bValue = new AtomicReference<>(Optional.empty());
+		final AtomicBoolean resolved = new AtomicBoolean(false);
+
+		final Jio<R, E, A> self = this;
+		return new SinkAndSource<>(new BiConsumer<R, BiConsumer<E, Z>>() {
+			@Override
+			public void accept(R r, BiConsumer<E, Z> ezBiConsumer) {
+				executor.execute(() -> {
+					self.unsafeRun(r, (e,a) -> {
+						if (!resolved.get()) {
+							if (e != null) {
+								resolved.set(true);
+								ezBiConsumer.accept(e, null);
+							} else {
+								final Optional<B> maybeB = bValue.get();
+								if (maybeB.isPresent()) {
+									final B b = maybeB.get();
+									ezBiConsumer.accept(null, fn.apply(a,b));
+									resolved.set(true);
+								} else {
+									aValue.set(Optional.ofNullable(a));
+								}
+							}
+						}
+					});
+				});
+				executor.execute(() -> {
+					that.unsafeRun(r, (e,b) -> {
+						if (!resolved.get()) {
+							if (e != null) {
+								resolved.set(true);
+								ezBiConsumer.accept(e, null);
+							} else {
+								final Optional<A> maybeA = aValue.get();
+								if (maybeA.isPresent()) {
+									final A a = maybeA.get();
+									ezBiConsumer.accept(null, fn.apply(a,b));
+									resolved.set(true);
+								} else {
+									bValue.set(Optional.ofNullable(b));
+								}
+							}
+						}
+					});
+				});
+			}
+		});
+	}
+
+	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios) {
+		final AtomicReference<Jio<R,E,List<A>>> sumRef = new AtomicReference<>(Jio.success(Collections.emptyList()));
+
+		jios.forEach(jio -> {
+			final Jio<R,E,List<A>> sum = sumRef.get();
+			final Jio<R,E,List<A>> newSum = sum.zipPar(jio, (lst,a) -> {
+				final List<A> ret = new ArrayList<>(lst);
+				ret.add(a);
+				return ret;
+			});
+			sumRef.set(newSum);
+		});
+
+		return sumRef.get();
+	}
+
+	@SuppressWarnings("unchecked")
+	public static <R,T extends Throwable,A> Jio<R,T,A> effect(CheckedSupplier<T,A> aSupplier) {
+		return new EvalAlways<>(new Supplier<Jio<R, T, A>>() {
+			@Override
+			public Jio<R, T, A> get() {
+				try {
+					A a = aSupplier.get();
+					return Jio.success(a);
+				} catch (Throwable t) {
+					return Jio.fail((T)t);
+				}
+			}
+		});
+	}
+
 	/**
-	 * constructs a Jio instance that runs its effect(s) every
+	 * constructs a Jio instance that runs its effectTotal(s) every
 	 * time the unsafeRun() method is called.
 	 *
 	 * @param aSupplier the value supplier that has side effects
@@ -65,7 +152,7 @@ public abstract class Jio<R,E,A> {
 	 * @param <A>       the Value type
 	 * @return          a Jio instance
 	 */
-	public static <R,E,A> Jio<R,E,A> effect(Supplier<A> aSupplier) {
+	public static <R,E,A> Jio<R,E,A> effectTotal(Supplier<A> aSupplier) {
 		return new EvalAlways<>(new Supplier<Jio<R,E,A>>() {
 			@Override
 			public Jio<R, E, A> get() {
