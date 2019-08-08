@@ -32,7 +32,7 @@ public class JioTest {
 	public void testJioFailure() {
 		Jio<Void,String,Integer> jio = Jio.fail("Bad request");
 		jio.unsafeRun(null, (ex,a) -> {
-			assertEquals("Bad request", ex);
+			assertEquals(new Cause<>("Bad request"), ex);
 			assertNull(a);
 		});
 	}
@@ -119,7 +119,7 @@ public class JioTest {
 		assertNotNull(jio);
 
 		jio.unsafeRun(null, (ex,a) -> {
-			assertTrue(ex instanceof ArithmeticException);
+			assertNotNull(ex);
 			assertNull(a);
 		});
 	}
@@ -171,7 +171,7 @@ public class JioTest {
 		});
 		assertNotNull(jio);
 		jio.unsafeRun(null, (ex,a) -> {
-			assertEquals("Authentication failed", ex);
+			assertEquals(new Cause<>("Authentication failed"), ex);
 			assertNull(a);
 		});
 	}
@@ -191,7 +191,7 @@ public class JioTest {
 		Jio<Void,String,Integer> jio1 = Jio.fail("Bad request");
 		Jio<Void,String,String> jio2 = jio1.map(i -> "X" + i);
 		jio2.unsafeRun(null, (ex,a) -> {
-			assertEquals("Bad request", ex);
+			assertEquals(new Cause<>("Bad request"), ex);
 			assertNull(a);
 		});
 	}
@@ -242,7 +242,7 @@ public class JioTest {
 		Jio<Void,String,Integer> jio1 = Jio.fail("Bad request");
 		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
 		jio2.unsafeRun(null, (ex,a) -> {
-			assertEquals(Integer.valueOf(11), ex);
+			assertEquals(new Cause<>(11), ex);
 			assertNull(a);
 		});
 	}
@@ -289,7 +289,7 @@ public class JioTest {
 
 		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
 		jio3.unsafeRun(null, (ex,a) -> {
-			assertEquals("hello world", ex);
+			assertEquals(new Cause<>("hello world"), ex);
 			assertNull(a);
 		});
 	}
@@ -299,13 +299,13 @@ public class JioTest {
 		Jio<Void,String,String> jio1 = Jio.fail("Bad Request");
 		Jio<Void,String,String> jio2 = jio1.flatMap(s -> Jio.success(s.toUpperCase()));
 		jio2.unsafeRun(null, (ex,a) -> {
-			assertEquals("Bad Request", ex);
+			assertEquals(new Cause<>("Bad Request"), ex);
 			assertNull(a);
 		});
 
 		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
 		jio3.unsafeRun(null, (ex,a) -> {
-			assertEquals("Bad Request", ex);
+			assertEquals(new Cause<>("Bad Request"), ex);
 			assertNull(a);
 		});
 	}
@@ -338,7 +338,7 @@ public class JioTest {
 
 		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
 		jio3.unsafeRun(null, (ex,a) -> {
-			assertEquals("foo", ex);
+			assertEquals(new Cause<>("foo"), ex);
 			assertNull(a);
 		});
 	}
@@ -354,7 +354,7 @@ public class JioTest {
 
 		Jio<Integer, String, String> jio3 = jio1.flatMap(s -> Jio.fail(s.toLowerCase()));
 		jio3.unsafeRun(4, (ex,a) -> {
-			assertEquals("xx4", ex);
+			assertEquals(new Cause<>("xx4"), ex);
 			assertNull(a);
 		});
 	}
@@ -362,7 +362,7 @@ public class JioTest {
 	@Test
 	public void testJioCatchAllFromSuccess() {
 		Jio<Void, String, Integer> jio1 = Jio.success(5);
-		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.getError().length()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
 			assertEquals(Integer.valueOf(5), a);
@@ -372,7 +372,7 @@ public class JioTest {
 	@Test
 	public void testJioCatchAllFromFailure() {
 		Jio<Void, String, Integer> jio1 = Jio.fail("Bad Request");
-		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.getError().length()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
 			assertEquals(Integer.valueOf(11), a);
@@ -382,7 +382,7 @@ public class JioTest {
 	@Test
 	public void testJioCatchAllFromPromise() {
 		Jio.Promise<Void, String, Integer> jio1 = Jio.promise();
-		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.getError().length()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
 			assertEquals(Integer.valueOf(5), a);
@@ -394,7 +394,7 @@ public class JioTest {
 	public void testJioCatchAllFromEvalAlways() {
 		AtomicInteger ai = new AtomicInteger(0);
 		Jio<Void, String, Integer> jio1 = Jio.effectTotal(ai::incrementAndGet);
-		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.length()));
+		Jio<Void, Void, Integer> jio2 = jio1.catchAll(s -> Jio.success(s.getError().length()));
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
 			assertEquals(Integer.valueOf(1), a);
@@ -431,19 +431,19 @@ public class JioTest {
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertEquals(1, out.size());
 			assertNull(a);
-			assertEquals("Failed!", ex);
+			assertEquals(new Cause<>("Failed!"), ex);
 		});
 	}
 
-//	@Test
-//	public void testEnsuringOverSinkAndSource() {
-//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
-//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fromTotalFunction($ -> null));
-//		jio2.unsafeRun(null, (ex,a) -> {
-//			assertNull(a);
-//			assertEquals("Failed!", ex);
-//		});
-//	}
+	@Test
+	public void testEnsuringOverSinkAndSource() {
+		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fromTotalFunction($ -> null));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(a);
+			assertEquals(new Cause<>("Failed!"), ex);
+		});
+	}
 
 	@Test
 	public void testEnsuringOverPromise() {
@@ -455,25 +455,25 @@ public class JioTest {
 		});
 	}
 
-//	@Test
-//	public void testEnsuringOverSuccess() {
-//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
-//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.success(null));
-//		jio2.unsafeRun(null, (ex,a) -> {
-//			assertNull(a);
-//			assertEquals("Failed!", ex);
-//		});
-//	}
+	@Test
+	public void testEnsuringOverSuccess() {
+		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.success(null));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(a);
+			assertEquals(new Cause<>("Failed!"), ex);
+		});
+	}
 
-//	@Test
-//	public void testEnsuringOverFailure() {
-//		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
-//		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fail(null));
-//		jio2.unsafeRun(null, (ex,a) -> {
-//			assertNull(a);
-//			assertEquals("Failed!", ex);
-//		});
-//	}
+	@Test
+	public void testEnsuringOverFailure() {
+		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.fail(null));
+		jio2.unsafeRun(null, (ex,a) -> {
+			assertNull(a);
+			assertEquals(new Cause<>("Failed!"), ex);
+		});
+	}
 
 	@Test
 	public void testBracket() {
@@ -492,6 +492,7 @@ public class JioTest {
 			Thread.sleep(500L);
 			return "Hello";
 		});
+
 		Jio<Void, InterruptedException, String> jio2 = Jio.effect(() -> {
 			Thread.sleep(600L);
 			return "World";
@@ -514,17 +515,18 @@ public class JioTest {
 	public void testCollectPar() throws InterruptedException {
 		long start = System.currentTimeMillis();
 		Jio<Void, InterruptedException, String> jio1 = Jio.effect(() -> {
-			Thread.sleep(500L);
+			Thread.sleep(500);
 			return "Hel";
 		});
 		Jio<Void, InterruptedException, String> jio2 = Jio.effect(() -> {
-			Thread.sleep(500L);
+			Thread.sleep(500);
 			return "lo W";
 		});
 		Jio<Void, InterruptedException, String> jio3 = Jio.effect(() -> {
-			Thread.sleep(600L);
+			Thread.sleep(600);
 			return "orld";
 		});
+
 		final AtomicBoolean called = new AtomicBoolean(false);
 		Jio.collectPar(Arrays.asList(jio1,jio2,jio3)).unsafeRun(null, (ex, lst) -> {
 			assertNull(ex);
@@ -542,11 +544,11 @@ public class JioTest {
 	public void testRaceOk() throws InterruptedException {
 		final AtomicBoolean called = new AtomicBoolean(false);
 		final Jio<Void, InterruptedException, String> winner = Jio.<Void,InterruptedException,String>effect(() -> {
-			Thread.sleep(100L);
+			Thread.sleep(100);
 			return "Hello";
 		}).race(Jio.effect(() -> {
-			Thread.sleep(200L);
-			return "Goodbye";
+			Thread.sleep(200);
+			return "World";
 		}));
 		winner.unsafeRun(null, (ex,a) -> {
 			assertNull(ex);
@@ -586,4 +588,19 @@ public class JioTest {
 		Thread.sleep(100L);
 		assertFalse(called.get());
 	}
+
+//	@Test
+//	public void testTimeout() throws InterruptedException {
+//		final Jio<Void, String, Integer> jio = Jio.promise();
+//
+//		final AtomicBoolean called = new AtomicBoolean(false);
+//		jio.timeout(1, TimeUnit.SECONDS).unsafeRun(null, (s,i) -> {
+//			assertNull(s);
+//			assertEquals(Optional.empty(), i);
+//			called.set(true);
+//		});
+//
+//		Thread.sleep(1100L);
+//		assertTrue(called.get());
+//	}
 }
