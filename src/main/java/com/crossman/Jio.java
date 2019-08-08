@@ -42,6 +42,42 @@ public abstract class Jio<R,E,A> {
 	}
 
 	public abstract <F> Jio<R,F,A> mapError(Function<E,F> fn);
+
+	public final <EE extends E, AA extends A> Jio<R,E,A> race(Jio<R,EE,AA> that) {
+		return race(that, Executors.newCachedThreadPool());
+	}
+
+	public final <EE extends E, AA extends A> Jio<R,E,A> race(Jio<R,EE,AA> that, Executor executor) {
+		final AtomicBoolean resolved = new AtomicBoolean(false);
+
+		final Jio<R, E, A> self = this;
+		return new SinkAndSource<>(new BiConsumer<R, BiConsumer<E, A>>() {
+			@Override
+			public void accept(R r, BiConsumer<E, A> eaBiConsumer) {
+				executor.execute(() -> {
+					self.unsafeRun(r, (e,a) -> {
+						if (!resolved.get()) {
+							if (e == null) {
+								resolved.set(true);
+								eaBiConsumer.accept(null, a);
+							}
+						}
+					});
+				});
+				executor.execute(() -> {
+					that.unsafeRun(r, (e,aa) -> {
+						if (!resolved.get()) {
+							if (e == null) {
+								resolved.set(true);
+								eaBiConsumer.accept(null, aa);
+							}
+						}
+					});
+				});
+			}
+		});
+	}
+
 	public abstract void unsafeRun(R r, BiConsumer<E,A> blk);
 
 	public final <EE extends E, B, Z> Jio<R,E,Z> zip(Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {

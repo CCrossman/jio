@@ -537,4 +537,53 @@ public class JioTest {
 		Thread.sleep(800);
 		assertTrue(called.get());
 	}
+
+	@Test
+	public void testRaceOk() throws InterruptedException {
+		final AtomicBoolean called = new AtomicBoolean(false);
+		final Jio<Void, InterruptedException, String> winner = Jio.<Void,InterruptedException,String>effect(() -> {
+			Thread.sleep(100L);
+			return "Hello";
+		}).race(Jio.effect(() -> {
+			Thread.sleep(200L);
+			return "Goodbye";
+		}));
+		winner.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("Hello", a);
+			called.set(true);
+		});
+
+		Thread.sleep(300L);
+		assertTrue(called.get());
+	}
+
+	@Test
+	public void testRaceFail() throws InterruptedException {
+		final AtomicBoolean called = new AtomicBoolean(false);
+		final Jio<Void, String, String> winner = Jio.<Void,String,String>fail("Hello").race(Jio.success("Goodbye"));
+		winner.unsafeRun(null, (ex,a) -> {
+			assertNull(ex);
+			assertEquals("Goodbye", a);
+			called.set(true);
+		});
+
+		Thread.sleep(100L);
+		assertTrue(called.get());
+	}
+
+	@Test
+	public void testRaceBothFail() throws InterruptedException {
+		final Jio<Void, String, Integer> winner = Jio.<Void,String,Integer>fail("Hello").race(Jio.fail("Goodbye"));
+
+		final AtomicBoolean called = new AtomicBoolean(false);
+		winner.unsafeRun(null, (ex,a) -> {
+			assertNotNull(ex);
+			assertNull(a);
+			called.set(true);
+		});
+
+		Thread.sleep(100L);
+		assertFalse(called.get());
+	}
 }
