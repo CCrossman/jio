@@ -111,20 +111,38 @@ public abstract class Jio<R,E,A> {
 		});
 	}
 
-	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios) {
-		final AtomicReference<Jio<R,E,List<A>>> sumRef = new AtomicReference<>(Jio.success(Collections.emptyList()));
-
-		jios.forEach(jio -> {
-			final Jio<R,E,List<A>> sum = sumRef.get();
-			final Jio<R,E,List<A>> newSum = sum.zipPar(jio, (lst,a) -> {
-				final List<A> ret = new ArrayList<>(lst);
-				ret.add(a);
-				return ret;
-			});
-			sumRef.set(newSum);
+	/**
+	 * constructs a Jio by building a list of values, or failing with an error
+	 *
+	 * @param jios      the collection of Jio instances
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,List<A>> collect(Collection<Jio<R,E,A>> jios) {
+		return reduce(Collections.emptyList(), jios, (lst,a) -> {
+			final List<A> ret = new ArrayList<>(lst);
+			ret.add(a);
+			return ret;
 		});
+	}
 
-		return sumRef.get();
+	/**
+	 * constructs a Jio by building a list of values, or failing with an error
+	 *
+	 * @param jios      the collection of Jio instances
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios) {
+		return reducePar(Collections.emptyList(), jios, (lst,a) -> {
+			final List<A> ret = new ArrayList<>(lst);
+			ret.add(a);
+			return ret;
+		});
 	}
 
 	@SuppressWarnings("unchecked")
@@ -188,6 +206,40 @@ public abstract class Jio<R,E,A> {
 	 */
 	public static <R,E,A> Jio<R,E,A> fail(E error) {
 		return new Failure<>(error);
+	}
+
+	/**
+	 * effectfully loop over values
+	 *
+	 * @param jios  the sequence of Jio instances
+	 * @param blk   the code block
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,Void> foreach(Collection<Jio<R,E,A>> jios, Consumer<A> blk) {
+		return reduce(null, jios, ($,a) -> {
+			blk.accept(a);
+			return null;
+		});
+	}
+
+	/**
+	 * effectfully loop over values
+	 *
+	 * @param jios  the sequence of Jio instances
+	 * @param blk   the code block
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,Void> foreachPar(Collection<Jio<R,E,A>> jios, Consumer<A> blk) {
+		return reducePar(null, jios, ($,a) -> {
+			blk.accept(a);
+			return null;
+		});
 	}
 
 	/**
@@ -285,6 +337,54 @@ public abstract class Jio<R,E,A> {
 	 */
 	public static <R,E,A> Promise<R,E,A> promise() {
 		return new Promise<>();
+	}
+
+	/**
+	 * constructs a Jio by reducing a collection of values into one, or failing with an error
+	 *
+	 * @param zero      the initial sum
+	 * @param jios      the collection of Jio instances
+	 * @param reducer   the reducing function
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @param <Z>       the sum type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A,Z> Jio<R,E,Z> reduce(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer) {
+		final AtomicReference<Jio<R,E,Z>> sumRef = new AtomicReference<>(Jio.success(zero));
+
+		jios.forEach(jio -> {
+			final Jio<R,E,Z> sum = sumRef.get();
+			final Jio<R,E,Z> newSum = sum.zip(jio, reducer);
+			sumRef.set(newSum);
+		});
+
+		return sumRef.get();
+	}
+
+	/**
+	 * constructs a Jio by reducing a collection of values into one, or failing with an error
+	 *
+	 * @param zero      the initial sum
+	 * @param jios      the collection of Jio instances
+	 * @param reducer   the reducing function
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @param <Z>       the sum type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A,Z> Jio<R,E,Z> reducePar(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer) {
+		final AtomicReference<Jio<R,E,Z>> sumRef = new AtomicReference<>(Jio.success(zero));
+
+		jios.forEach(jio -> {
+			final Jio<R,E,Z> sum = sumRef.get();
+			final Jio<R,E,Z> newSum = sum.zipPar(jio, reducer);
+			sumRef.set(newSum);
+		});
+
+		return sumRef.get();
 	}
 
 	/**
