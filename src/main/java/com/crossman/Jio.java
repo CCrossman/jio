@@ -25,7 +25,19 @@ public abstract class Jio<R,E,A> {
 		return this.<F,A>foldCauseM(c -> fn.apply(c).map(aa -> (A)aa), Jio::success);
 	}
 
-	public abstract Jio<R,E,A> ensuring(Jio<R,Void,Void> finalizer);
+	public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
+		final Jio<R, E, A> self = this;
+		return new SinkAndSource<>(new BiConsumer<R, BiConsumer<Cause<E>, A>>() {
+			@Override
+			public void accept(R r, BiConsumer<Cause<E>, A> causeABiConsumer) {
+				self.unsafeRun(r, ((eCause, a) -> {
+					finalizer.unsafeRun(r, ($1,$2) -> {
+						causeABiConsumer.accept(eCause,a);
+					});
+				}));
+			}
+		});
+	}
 
 	public final <EE extends E, B> Jio<R,E,B> flatMap(Function<A,Jio<R,EE,B>> fn) {
 		return this.<E,B>foldCauseM(Jio::failCause, a -> fn.apply(a).mapError(ee -> (E)ee));
@@ -216,7 +228,7 @@ public abstract class Jio<R,E,A> {
 	}
 
 	public static <R,E,A> Jio<R,E,A> effectTotal(Supplier<A> aSupplier) {
-		return new EvalAlways<>(() -> Jio.successLazy(aSupplier));
+		return new EvalAlways<>(() -> Jio.success(aSupplier.get()));
 	}
 
 	public static <R,E,A> Jio<R,E,A> effectAsync(Consumer<Consumer<Jio<R,E,A>>> blk) {
@@ -397,11 +409,6 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
-			return finalizer.foldCauseM($ -> this, $ -> this);
-		}
-
-		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
 			return onFail.apply(cause);
 		}
@@ -420,11 +427,6 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
-		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
-			return finalizer.foldCauseM($ -> this, $ -> this);
-		}
-
-		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
 			return onPass.apply(value);
 		}
@@ -440,11 +442,6 @@ public abstract class Jio<R,E,A> {
 
 		private EvalAlways(Supplier<Jio<R, E, A>> jioSupplier) {
 			this.jioSupplier = jioSupplier;
-		}
-
-		@Override
-		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
-			return new EvalAlways<>(() -> jioSupplier.get().ensuring(finalizer));
 		}
 
 		@Override
@@ -468,24 +465,6 @@ public abstract class Jio<R,E,A> {
 		private Jio<R,E,A> delegate;
 
 		private Promise() {}
-
-		@Override
-		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
-			final Promise<R,E,A> p = new Promise<>();
-
-			if (delegate == null) {
-				onDoneListeners.add(new OnDoneListener<R, E, A>() {
-					@Override
-					public void onDone(Jio<R, E, A> jio) {
-						p.setDelegate(jio.ensuring(finalizer));
-					}
-				});
-			} else {
-				p.setDelegate(delegate.ensuring(finalizer));
-			}
-
-			return p;
-		}
 
 		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
@@ -529,20 +508,6 @@ public abstract class Jio<R,E,A> {
 
 		private SinkAndSource(BiConsumer<R, BiConsumer<Cause<E>, A>> bic) {
 			this.bic = bic;
-		}
-
-		@Override
-		public Jio<R, E, A> ensuring(Jio<R, Void, Void> finalizer) {
-			return new SinkAndSource<>(new BiConsumer<R, BiConsumer<Cause<E>, A>>() {
-				@Override
-				public void accept(R r, BiConsumer<Cause<E>, A> causeABiConsumer) {
-					bic.accept(r, ((eCause, a) -> {
-						finalizer.unsafeRun(r, ($1,$2) -> {
-							causeABiConsumer.accept(eCause,a);
-						});
-					}));
-				}
-			});
 		}
 
 		@Override

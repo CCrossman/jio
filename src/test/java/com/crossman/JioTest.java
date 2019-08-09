@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -421,7 +422,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testEnsuringOverEffect() {
+	public void testEnsuringOverEffect() throws InterruptedException {
 		final List<String> out = new ArrayList<>();
 		Jio<Void, String, Integer> jio1 = Jio.fail("Failed!");
 		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.effectTotal(() -> {
@@ -429,10 +430,11 @@ public class JioTest {
 			return null;
 		}));
 		jio2.unsafeRun(null, (ex,a) -> {
-			assertEquals(1, out.size());
 			assertNull(a);
 			assertEquals(new Cause<>("Failed!"), ex);
 		});
+		Thread.sleep(100);
+		assertEquals(1, out.size());
 	}
 
 	@Test
@@ -451,7 +453,7 @@ public class JioTest {
 		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.promise());
 		jio2.unsafeRun(null, (ex,a) -> {
 			assertNull(a);
-			assertEquals("Failed!", ex);
+			assertEquals(new Cause<>("Failed!"), ex);
 		});
 	}
 
@@ -473,6 +475,26 @@ public class JioTest {
 			assertNull(a);
 			assertEquals(new Cause<>("Failed!"), ex);
 		});
+	}
+
+	@Test
+	public void testEnsuringOverTwoEffects() throws InterruptedException {
+		final List<String> out = Collections.synchronizedList(new ArrayList<>());
+		Jio<Void, String, Integer> jio1 = Jio.effectTotal(() -> {
+			out.add("Hello");
+			return 1;
+		});
+		Jio<Void, String, Integer> jio2 = jio1.ensuring(Jio.effectTotal(() -> {
+			out.add("World");
+			return null;
+		}));
+		jio2.unsafeRun(null, (ex,a) -> {
+			//assertEquals(Collections.singletonList("Hello"),out);
+			assertNull(ex);
+			assertEquals(Integer.valueOf(1), a);
+		});
+		Thread.sleep(100);
+		assertEquals(Arrays.asList("Hello", "World"), out);
 	}
 
 	@Test
