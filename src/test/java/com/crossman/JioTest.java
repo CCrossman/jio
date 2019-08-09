@@ -489,7 +489,7 @@ public class JioTest {
 			return null;
 		}));
 		jio2.unsafeRun(null, (ex,a) -> {
-			//assertEquals(Collections.singletonList("Hello"),out);
+			assertEquals(Collections.singletonList("Hello"),out);
 			assertNull(ex);
 			assertEquals(Integer.valueOf(1), a);
 		});

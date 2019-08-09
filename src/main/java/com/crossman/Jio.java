@@ -31,9 +31,8 @@ public abstract class Jio<R,E,A> {
 			@Override
 			public void accept(R r, BiConsumer<Cause<E>, A> causeABiConsumer) {
 				self.unsafeRun(r, ((eCause, a) -> {
-					finalizer.unsafeRun(r, ($1,$2) -> {
-						causeABiConsumer.accept(eCause,a);
-					});
+					causeABiConsumer.accept(eCause,a);
+					finalizer.unsafeRun(r, ($1,$2) -> { });
 				}));
 			}
 		});
