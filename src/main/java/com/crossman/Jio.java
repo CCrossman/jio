@@ -499,6 +499,10 @@ public abstract class Jio<R,E,A> {
 
 		public void setDelegate(Jio<R, E, A> delegate) {
 			this.delegate = delegate;
+
+			while (!onDoneListeners.isEmpty()) {
+				onDoneListeners.poll().onDone(delegate);
+			}
 		}
 	}
 

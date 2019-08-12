@@ -259,14 +259,15 @@ public class JioTest {
 	}
 
 	@Test
-	public void testJioMapErrorFromPromise() {
+	public void testJioMapErrorFromPromise() throws InterruptedException {
 		Jio.Promise<Void,String,Integer> jio1 = Jio.promise();
 		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
 		jio2.unsafeRun(null, (ex,a) -> {
-			assertEquals(Integer.valueOf(4),ex);
+			assertEquals(new Cause<>(4),ex);
 			assertNull(a);
 		});
 		jio1.setDelegate(Jio.fail("hiya"));
+		Thread.sleep(100);
 	}
 
 	@Test
@@ -322,8 +323,8 @@ public class JioTest {
 
 		Jio<Void,String,String> jio3 = jio1.flatMap(s -> Jio.success(s.toLowerCase()));
 		jio3.unsafeRun(null, (ex,a) -> {
-			assertEquals("foobar", ex);
-			assertNull(a);
+			assertNull(ex);
+			assertEquals("foobar", a);
 		});
 		jio1.setDelegate(Jio.success("FooBar"));
 	}
