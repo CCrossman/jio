@@ -4,10 +4,7 @@ import com.crossman.util.CheckedFunction;
 import com.crossman.util.CheckedSupplier;
 
 import java.util.*;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
@@ -61,6 +58,16 @@ public abstract class Jio<R,E,A> {
 
 	public abstract <F, Z> Jio<R,F,Z> foldCauseM(Function<Cause<E>,Jio<R,F,Z>> onFail, Function<A,Jio<R,F,Z>> onPass);
 
+	public final void interrupt() {
+		interruptWithCause(Cause.interrupted());
+	}
+
+	public final void interrupt(E reason) {
+		interruptWithCause(new Cause<>(reason));
+	}
+
+	public abstract void interruptWithCause(Cause<E> cause);
+
 	public final <B> Jio<R,E,B> map(Function<A,B> fn) {
 		return flatMap(a -> Jio.success(fn.apply(a)));
 	}
@@ -73,7 +80,15 @@ public abstract class Jio<R,E,A> {
 		return race(that, Executors.newCachedThreadPool());
 	}
 
+	public final <EE extends E, AA extends A> Jio<R,E,A> race(Cause<EE> onTimeout, Jio<R,EE,AA> that) {
+		return race(onTimeout, that, Executors.newCachedThreadPool());
+	}
+
 	public final <EE extends E, AA extends A> Jio<R,E,A> race(Jio<R,EE,AA> that, Executor executor) {
+		return race(Cause.interrupted(), that, executor);
+	}
+
+	public final <EE extends E, AA extends A> Jio<R,E,A> race(Cause<EE> onTimeout, Jio<R,EE,AA> that, Executor executor) {
 		final AtomicBoolean resolved = new AtomicBoolean(false);
 
 		final Jio<R, E, A> self = this;
@@ -85,6 +100,7 @@ public abstract class Jio<R,E,A> {
 						if (!resolved.get()) {
 							if (e == null) {
 								resolved.set(true);
+								that.interruptWithCause(onTimeout);
 								eaBiConsumer.accept(null, a);
 							}
 						}
@@ -95,11 +111,50 @@ public abstract class Jio<R,E,A> {
 						if (!resolved.get()) {
 							if (e == null) {
 								resolved.set(true);
+								self.interruptWithCause(onTimeout.map(ee -> (E)ee));
 								eaBiConsumer.accept(null, aa);
 							}
 						}
 					});
 				});
+			}
+		});
+	}
+
+	public final Jio<R,E,Optional<A>> timeout(long howMany, TimeUnit timeUnit) {
+		return timeoutWith(Cause.interrupted(), howMany, timeUnit);
+	}
+
+	public final Jio<R,E,Optional<A>> timeoutWith(Cause<E> onTimeout, long howMany, TimeUnit timeUnit) {
+		final Jio<R, E, A> self = this;
+		return new SinkAndSource<>(new BiConsumer<R, BiConsumer<Cause<E>, Optional<A>>>() {
+			@Override
+			public void accept(R r, BiConsumer<Cause<E>, Optional<A>> causeOptionalBiConsumer) {
+				final AtomicBoolean resolved = new AtomicBoolean(false);
+
+				final Timer timer = new Timer();
+				timer.schedule(new TimerTask() {
+					@Override
+					public void run() {
+						if (!resolved.get()) {
+							resolved.set(true);
+							self.interruptWithCause(onTimeout);
+							causeOptionalBiConsumer.accept(null, Optional.empty());
+						}
+					}
+				}, timeUnit.toMillis(howMany));
+
+				self.unsafeRun(r, ((eCause, a) -> {
+					if (!resolved.get()) {
+						resolved.set(true);
+						timer.cancel();
+						if (eCause != null) {
+							causeOptionalBiConsumer.accept(eCause,null);
+						} else {
+							causeOptionalBiConsumer.accept(null, Optional.ofNullable(a));
+						}
+					}
+				}));
 			}
 		});
 	}
@@ -122,7 +177,15 @@ public abstract class Jio<R,E,A> {
 		return zipPar(that, fn, Executors.newCachedThreadPool());
 	}
 
+	public final <EE extends E, B, Z> Jio<R, E, Z> zipPar(Cause<EE> onInterrupt, Jio<R,EE,B> that, BiFunction<A,B,Z> fn) {
+		return zipPar(onInterrupt, that, fn, Executors.newCachedThreadPool());
+	}
+
 	public final <EE extends E, B, Z> Jio<R, E, Z> zipPar(Jio<R,EE,B> that, BiFunction<A,B,Z> fn, Executor executor) {
+		return zipPar(Cause.interrupted(), that, fn, executor);
+	}
+
+	public final <EE extends E, B, Z> Jio<R, E, Z> zipPar(Cause<EE> onInterrupt, Jio<R,EE,B> that, BiFunction<A,B,Z> fn, Executor executor) {
 		final Jio<R, E, A> self = this;
 		final AtomicReference<Optional<A>> maybeARef = new AtomicReference<>(Optional.empty());
 		final AtomicReference<Optional<B>> maybeBRef = new AtomicReference<>(Optional.empty());
@@ -136,7 +199,7 @@ public abstract class Jio<R,E,A> {
 						if (!resolved.get()) {
 							if (eCause != null) {
 								resolved.set(true);
-								// that.interrupt()
+								that.interruptWithCause(onInterrupt);
 								causeZBiConsumer.accept(eCause,null);
 							} else {
 								final Optional<B> maybeB = maybeBRef.get();
@@ -157,7 +220,7 @@ public abstract class Jio<R,E,A> {
 						if (!resolved.get()) {
 							if (eeCause != null) {
 								resolved.set(true);
-								// self.interrupt()
+								self.interruptWithCause(onInterrupt.map(ee -> (E)ee));
 								causeZBiConsumer.accept(eeCause.map(ee -> (E)ee), null);
 							} else {
 								final Optional<A> maybeA = maybeARef.get();
@@ -206,11 +269,50 @@ public abstract class Jio<R,E,A> {
 	 * @return          a Jio instance
 	 */
 	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios) {
+		return collectPar(jios, Cause.interrupted(), Executors.newCachedThreadPool());
+	}
+
+	/**
+	 * constructs a Jio by building a list of values, or failing with an error
+	 *
+	 * @param jios      the collection of Jio instances
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios, Cause<E> onTimeout) {
+		return collectPar(jios, onTimeout, Executors.newCachedThreadPool());
+	}
+
+	/**
+	 * constructs a Jio by building a list of values, or failing with an error
+	 *
+	 * @param jios      the collection of Jio instances
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios, Executor executor) {
+		return collectPar(jios, Cause.interrupted(), executor);
+	}
+
+	/**
+	 * constructs a Jio by building a list of values, or failing with an error
+	 *
+	 * @param jios      the collection of Jio instances
+	 * @param <R>       the Environment type
+	 * @param <E>       the Failure type
+	 * @param <A>       the Value type
+	 * @return          a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,List<A>> collectPar(Collection<Jio<R,E,A>> jios, Cause<E> onTimeout, Executor executor) {
 		return reducePar(Collections.emptyList(), jios, (lst,a) -> {
 			final List<A> ret = new ArrayList<>(lst);
 			ret.add(a);
 			return ret;
-		});
+		}, onTimeout, executor);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -272,10 +374,52 @@ public abstract class Jio<R,E,A> {
 	 * @return      a Jio instance
 	 */
 	public static <R,E,A> Jio<R,E,Void> foreachPar(Collection<Jio<R,E,A>> jios, Consumer<A> blk) {
+		return foreachPar(jios, blk, Cause.interrupted(), Executors.newSingleThreadExecutor());
+	}
+
+	/**
+	 * effectfully loop over values
+	 *
+	 * @param jios  the sequence of Jio instances
+	 * @param blk   the code block
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,Void> foreachPar(Collection<Jio<R,E,A>> jios, Consumer<A> blk, Cause<E> onTimeout) {
+		return foreachPar(jios, blk, onTimeout, Executors.newSingleThreadExecutor());
+	}
+
+	/**
+	 * effectfully loop over values
+	 *
+	 * @param jios  the sequence of Jio instances
+	 * @param blk   the code block
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,Void> foreachPar(Collection<Jio<R,E,A>> jios, Consumer<A> blk, Executor executor) {
+		return foreachPar(jios, blk, Cause.interrupted(), executor);
+	}
+
+	/**
+	 * effectfully loop over values
+	 *
+	 * @param jios  the sequence of Jio instances
+	 * @param blk   the code block
+	 * @param <R>   the Environment type
+	 * @param <E>   the Failure type
+	 * @param <A>   the Value type
+	 * @return      a Jio instance
+	 */
+	public static <R,E,A> Jio<R,E,Void> foreachPar(Collection<Jio<R,E,A>> jios, Consumer<A> blk, Cause<E> onTimeout, Executor executor) {
 		return reducePar(null, jios, ($,a) -> {
 			blk.accept(a);
 			return null;
-		});
+		}, onTimeout, executor);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -330,7 +474,6 @@ public abstract class Jio<R,E,A> {
 		return p;
 	}
 
-	@SuppressWarnings("unchecked")
 	public static <R,A> Jio<R,Void,A> fromTotalFunction(Function<R,A> fn) {
 		return new SinkAndSource<>(new BiConsumer<R, BiConsumer<Cause<Void>, A>>() {
 			@Override
@@ -341,6 +484,7 @@ public abstract class Jio<R,E,A> {
 		});
 	}
 
+	@SuppressWarnings("unchecked")
 	public static <R,T extends Throwable,A> Jio<R,T,A> fromTrying(CheckedSupplier<T,A> taCheckedSupplier) {
 		try {
 			A a = taCheckedSupplier.get();
@@ -349,6 +493,10 @@ public abstract class Jio<R,E,A> {
 			T t = (T)th;
 			return fail(t);
 		}
+	}
+
+	public static <R,E,A> Jio<R,E,A> interrupted() {
+		return Jio.failCause(Cause.interrupted());
 	}
 
 	public static <R,E,A> Promise<R,E,A> promise() {
@@ -368,11 +516,23 @@ public abstract class Jio<R,E,A> {
 	}
 
 	public static <R,E,A,Z> Jio<R,E,Z> reducePar(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer) {
+		return reducePar(zero, jios, reducer, Cause.interrupted(), Executors.newSingleThreadExecutor());
+	}
+
+	public static <R,E,A,Z> Jio<R,E,Z> reducePar(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer, Cause<E> onTimeout) {
+		return reducePar(zero, jios, reducer, onTimeout, Executors.newSingleThreadExecutor());
+	}
+
+	public static <R,E,A,Z> Jio<R,E,Z> reducePar(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer, Executor executor) {
+		return reducePar(zero, jios, reducer, Cause.interrupted(), executor);
+	}
+
+	public static <R,E,A,Z> Jio<R,E,Z> reducePar(Z zero, Collection<Jio<R,E,A>> jios, BiFunction<Z,A,Z> reducer, Cause<E> onTimeout, Executor executor) {
 		final AtomicReference<Jio<R,E,Z>> sumRef = new AtomicReference<>(Jio.success(zero));
 
 		jios.forEach(jio -> {
 			final Jio<R,E,Z> sum = sumRef.get();
-			final Jio<R,E,Z> newSum = sum.zipPar(jio, reducer);
+			final Jio<R,E,Z> newSum = sum.zipPar(onTimeout, jio, reducer, executor);
 			sumRef.set(newSum);
 		});
 
@@ -402,6 +562,7 @@ public abstract class Jio<R,E,A> {
 
 	public static final class Failure<R,E,A> extends Jio<R,E,A> {
 		private final Cause<E> cause;
+		private Cause<E> interrupted;
 
 		private Failure(Cause<E> cause) {
 			this.cause = cause;
@@ -409,17 +570,30 @@ public abstract class Jio<R,E,A> {
 
 		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
+			if (interrupted != null) {
+				return onFail.apply(interrupted);
+			}
 			return onFail.apply(cause);
 		}
 
 		@Override
+		public void interruptWithCause(Cause<E> cause) {
+			this.interrupted = cause;
+		}
+
+		@Override
 		public void unsafeRun(R environment, BiConsumer<Cause<E>, A> blk) {
-			blk.accept(cause,null);
+			if (interrupted != null) {
+				blk.accept(interrupted, null);
+			} else {
+				blk.accept(cause, null);
+			}
 		}
 	}
 
 	public static final class Success<R,E,A> extends Jio<R,E,A> {
 		private final A value;
+		private Cause<E> interrupted;
 
 		private Success(A value) {
 			this.value = value;
@@ -427,17 +601,30 @@ public abstract class Jio<R,E,A> {
 
 		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
+			if (interrupted != null) {
+				return onFail.apply(interrupted);
+			}
 			return onPass.apply(value);
 		}
 
 		@Override
+		public void interruptWithCause(Cause<E> cause) {
+			this.interrupted = cause;
+		}
+
+		@Override
 		public void unsafeRun(R environment, BiConsumer<Cause<E>, A> blk) {
-			blk.accept(null, value);
+			if (interrupted != null) {
+				blk.accept(interrupted, null);
+			} else {
+				blk.accept(null, value);
+			}
 		}
 	}
 
 	public static final class EvalAlways<R,E,A> extends Jio<R,E,A> {
 		private final Supplier<Jio<R,E,A>> jioSupplier;
+		private Cause<E> interrupted;
 
 		private EvalAlways(Supplier<Jio<R, E, A>> jioSupplier) {
 			this.jioSupplier = jioSupplier;
@@ -445,12 +632,24 @@ public abstract class Jio<R,E,A> {
 
 		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
+			if (interrupted != null) {
+				return onFail.apply(interrupted);
+			}
 			return new EvalAlways<>(() -> jioSupplier.get().foldCauseM(onFail, onPass));
 		}
 
 		@Override
+		public void interruptWithCause(Cause<E> cause) {
+			this.interrupted = cause;
+		}
+
+		@Override
 		public void unsafeRun(R environment, BiConsumer<Cause<E>, A> blk) {
-			jioSupplier.get().unsafeRun(environment, blk);
+			if (interrupted != null) {
+				blk.accept(interrupted,null);
+			} else {
+				jioSupplier.get().unsafeRun(environment, blk);
+			}
 		}
 	}
 
@@ -467,47 +666,63 @@ public abstract class Jio<R,E,A> {
 
 		@Override
 		public <F, Z> Jio<R, F, Z> foldCauseM(Function<Cause<E>, Jio<R, F, Z>> onFail, Function<A, Jio<R, F, Z>> onPass) {
-			final Promise<R,F,Z> p = new Promise<>();
+			synchronized (this) {
+				final Promise<R, F, Z> p = new Promise<>();
 
-			if (delegate == null) {
-				onDoneListeners.add(new OnDoneListener<R, E, A>() {
-					@Override
-					public void onDone(Jio<R, E, A> jio) {
-						p.setDelegate(jio.foldCauseM(onFail, onPass));
-					}
-				});
-			} else {
-				p.setDelegate(delegate.foldCauseM(onFail, onPass));
+				if (delegate == null) {
+					onDoneListeners.add(new OnDoneListener<R, E, A>() {
+						@Override
+						public void onDone(Jio<R, E, A> jio) {
+							p.setDelegate(jio.foldCauseM(onFail, onPass));
+						}
+					});
+				} else {
+					p.setDelegate(delegate.foldCauseM(onFail, onPass));
+				}
+
+				return p;
 			}
+		}
 
-			return p;
+		@Override
+		public void interruptWithCause(Cause<E> cause) {
+			synchronized (this) {
+				setDelegate(Jio.failCause(cause));
+			}
 		}
 
 		@Override
 		public void unsafeRun(R environment, BiConsumer<Cause<E>, A> blk) {
-			if (delegate == null) {
-				onDoneListeners.add(new OnDoneListener<R, E, A>() {
-					@Override
-					public void onDone(Jio<R, E, A> jio) {
-						jio.unsafeRun(environment, blk);
-					}
-				});
-			} else {
-				delegate.unsafeRun(environment, blk);
+			synchronized (this) {
+				if (delegate == null) {
+					onDoneListeners.add(new OnDoneListener<R, E, A>() {
+						@Override
+						public void onDone(Jio<R, E, A> jio) {
+							jio.unsafeRun(environment, blk);
+						}
+					});
+				} else {
+					delegate.unsafeRun(environment, blk);
+				}
 			}
 		}
 
 		public void setDelegate(Jio<R, E, A> delegate) {
-			this.delegate = delegate;
+			synchronized (this) {
+				if (this.delegate == null) {
+					this.delegate = delegate;
 
-			while (!onDoneListeners.isEmpty()) {
-				onDoneListeners.poll().onDone(delegate);
+					while (!onDoneListeners.isEmpty()) {
+						onDoneListeners.poll().onDone(delegate);
+					}
+				}
 			}
 		}
 	}
 
 	public static final class SinkAndSource<R,E,A> extends Jio<R,E,A> {
 		private final BiConsumer<R,BiConsumer<Cause<E>,A>> bic;
+		private Cause<E> interrupted;
 
 		private SinkAndSource(BiConsumer<R, BiConsumer<Cause<E>, A>> bic) {
 			this.bic = bic;
@@ -519,7 +734,10 @@ public abstract class Jio<R,E,A> {
 				@Override
 				public void accept(R r, BiConsumer<Cause<F>, Z> causeZBiConsumer) {
 					bic.accept(r, ((eCause, a) -> {
-						if (eCause != null) {
+						if (interrupted != null) {
+							Jio<R,F,Z> jio = onFail.apply(interrupted);
+							jio.unsafeRun(r, causeZBiConsumer);
+						} else if (eCause != null) {
 							Jio<R,F,Z> jio = onFail.apply(eCause);
 							jio.unsafeRun(r, causeZBiConsumer);
 						} else {
@@ -532,8 +750,17 @@ public abstract class Jio<R,E,A> {
 		}
 
 		@Override
+		public void interruptWithCause(Cause<E> cause) {
+			this.interrupted = cause;
+		}
+
+		@Override
 		public void unsafeRun(R environment, BiConsumer<Cause<E>, A> blk) {
-			bic.accept(environment,blk);
+			if (interrupted != null) {
+				blk.accept(interrupted,null);
+			} else {
+				bic.accept(environment, blk);
+			}
 		}
 	}
 }

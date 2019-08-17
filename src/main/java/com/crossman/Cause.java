@@ -4,6 +4,8 @@ import java.util.Objects;
 import java.util.function.Function;
 
 public final class Cause<E> {
+	private static final Cause<Void> interrupted = new Cause<>(null, new InterruptedException());
+
 	private final E error;
 	private final Throwable cause;
 
@@ -52,5 +54,10 @@ public final class Cause<E> {
 				"error=" + error +
 				", cause=" + cause +
 				'}';
+	}
+
+	@SuppressWarnings("unchecked")
+	public static <E> Cause<E> interrupted() {
+		return (Cause<E>)interrupted;
 	}
 }

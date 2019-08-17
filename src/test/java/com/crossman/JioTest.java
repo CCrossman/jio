@@ -1,17 +1,13 @@
 package com.crossman;
 
-import com.crossman.util.CheckedSupplier;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -282,7 +278,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testJioMapErrorFromPromise() throws InterruptedException {
+	public void testJioMapErrorFromPromise() {
 		Jio.Promise<Void,String,Integer> jio1 = Jio.promise();
 		Jio<Void,Integer,Integer> jio2 = jio1.mapError(s -> s.length());
 		jio1.setDelegate(Jio.fail("hiya"));
@@ -533,7 +529,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testZipPar() throws InterruptedException {
+	public void testZipPar() {
 		Jio<Void, InterruptedException, String> jio1 = Jio.effect(() -> {
 			Thread.sleep(500L);
 			return "Hello";
@@ -551,7 +547,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testCollectPar() throws InterruptedException {
+	public void testCollectPar() {
 		Jio<Void, InterruptedException, String> jio1 = Jio.effect(() -> {
 			Thread.sleep(500);
 			return "Hel";
@@ -572,7 +568,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testRaceOk() throws InterruptedException {
+	public void testRaceOk() {
 		final Jio<Void, InterruptedException, String> winner = Jio.<Void,InterruptedException,String>effect(() -> {
 			Thread.sleep(100);
 			return "Hello";
@@ -587,7 +583,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testRaceFail() throws InterruptedException {
+	public void testRaceFail() {
 		final Jio<Void, String, String> winner = Jio.<Void,String,String>fail("Hello").race(Jio.success("Goodbye"));
 		assertCalled(winner,null, (ex,a) -> {
 			assertNull(ex);
@@ -596,7 +592,7 @@ public class JioTest {
 	}
 
 	@Test
-	public void testRaceBothFail() throws InterruptedException {
+	public void testRaceBothFail() {
 		final Jio<Void, String, Integer> winner = Jio.<Void,String,Integer>fail("Hello").race(Jio.fail("Goodbye"));
 
 		assertNotCalled(winner, null, (ex,a) -> {
@@ -605,18 +601,158 @@ public class JioTest {
 		});
 	}
 
-//	@Test
-//	public void testTimeout() throws InterruptedException {
-//		final Jio<Void, String, Integer> jio = Jio.promise();
-//
-//		final AtomicBoolean called = new AtomicBoolean(false);
-//		jio.timeout(1, TimeUnit.SECONDS).unsafeRun(null, (s,i) -> {
-//			assertNull(s);
-//			assertEquals(Optional.empty(), i);
-//			called.set(true);
-//		});
-//
-//		Thread.sleep(1100L);
-//		assertTrue(called.get());
-//	}
+	@Test
+	public void testTimeoutOK() {
+		final Jio.Promise<Void, String, Integer> jio = Jio.promise();
+		jio.setDelegate(Jio.success(5));
+
+		assertCalled(100, jio.timeout(200, TimeUnit.MILLISECONDS),null, (s, i) -> {
+			assertNull(s);
+			assertEquals(Optional.of(5), i);
+		});
+	}
+
+	@Test
+	public void testTimeoutFail() {
+		final Jio<Void, String, Integer> jio = Jio.promise();
+
+		assertCalled(200, jio.timeoutWith(Cause.interrupted(), 100, TimeUnit.MILLISECONDS),null, (s, i) -> {
+			assertNull(s);
+			assertEquals(Optional.empty(), i);
+		});
+	}
+
+	@Test
+	public void testInterruptSuccess() {
+		final Jio<Void, String, Integer> jio = Jio.success(5);
+		jio.interrupt();
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertNull(cause.getError());
+			assertTrue(cause.getCause() instanceof InterruptedException);
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptFail() {
+		final Jio<Void, String, Integer> jio = Jio.fail("bad request");
+		jio.interrupt();
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertNull(cause.getError());
+			assertTrue(cause.getCause() instanceof InterruptedException);
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptEvalAlways() {
+		final Jio<Void, String, Integer> jio = Jio.effectTotal(() -> 7);
+		jio.interrupt();
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertNull(cause.getError());
+			assertTrue(cause.getCause() instanceof InterruptedException);
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptPromise() {
+		final Jio.Promise<Void, String, Integer> jio1 = Jio.promise();
+		final Jio<Void, String, String> jio2 = jio1.map(i -> i.toString());
+		jio2.interrupt();
+		jio1.setDelegate(Jio.success(4));
+
+		assertCalled(jio2, null, (c,i) -> {
+			assertNotNull(c);
+			assertNull(c.getError());
+			assertTrue(c.getCause() instanceof InterruptedException);
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptSinkAndSource() {
+		final Jio<Integer, Throwable, String> jio = Jio.fromFunction(Object::toString);
+		jio.interrupt();
+
+		assertCalled(jio, 3, (c,i) -> {
+			assertNotNull(c);
+			assertNull(c.getError());
+			assertTrue(c.getCause() instanceof InterruptedException);
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptWithSuccess() {
+		final Jio<Void, String, Integer> jio = Jio.success(5);
+		jio.interrupt("forget it");
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertEquals("forget it", cause.getError());
+			assertNull(cause.getCause());
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptWithFail() {
+		final Jio<Void, String, Integer> jio = Jio.fail("bad request");
+		jio.interrupt("nevermind");
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertEquals("nevermind", cause.getError());
+			assertNull(cause.getCause());
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptWithEvalAlways() {
+		final Jio<Void, String, Integer> jio = Jio.effectTotal(() -> 7);
+		jio.interrupt("nada");
+
+		assertCalled(jio, null, (cause, i) -> {
+			assertNotNull(cause);
+			assertEquals("nada", cause.getError());
+			assertNull(cause.getCause());
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptWithPromise() {
+		final Jio.Promise<Void, String, Integer> jio1 = Jio.promise();
+		final Jio<Void, String, String> jio2 = jio1.map(i -> i.toString());
+		jio2.interrupt("interrupted");
+		jio1.setDelegate(Jio.success(4));
+
+		assertCalled(jio2, null, (c,i) -> {
+			assertNotNull(c);
+			assertEquals("interrupted", c.getError());
+			assertNull(c.getCause());
+			assertNull(i);
+		});
+	}
+
+	@Test
+	public void testInterruptWithSinkAndSource() {
+		final Jio<Integer, Throwable, String> jio = Jio.fromFunction(Object::toString);
+		jio.interrupt(new IllegalArgumentException());
+
+		assertCalled(jio, 3, (c,i) -> {
+			assertNotNull(c);
+			assertTrue(c.getError() instanceof IllegalArgumentException);
+			assertNull(c.getCause());
+			assertNull(i);
+		});
+	}
 }
